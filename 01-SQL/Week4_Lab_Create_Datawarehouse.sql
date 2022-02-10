@@ -30,7 +30,7 @@ CREATE TABLE `dim_suppliers` (
   `last_name` varchar(50) DEFAULT NULL,
   `first_name` varchar(50) DEFAULT NULL,
   `job_title` varchar(50) DEFAULT NULL,
-  PRIMARY KEY (`id`),
+  PRIMARY KEY (`supplier_key`),
   KEY `company` (`company`),
   KEY `first_name` (`first_name`),
   KEY `last_name` (`last_name`)
@@ -53,7 +53,7 @@ CREATE TABLE `dim_employees` (
   `country_region` varchar(50) DEFAULT NULL,
   `web_page` longtext,
   `notes` longtext,
-  PRIMARY KEY (`id`),
+  PRIMARY KEY (`employee_key`),
   KEY `city` (`city`),
   KEY `company` (`company`),
   KEY `first_name` (`first_name`),
@@ -70,12 +70,12 @@ CREATE TABLE `dim_shippers` (
   `state_province` varchar(50) DEFAULT NULL,
   `zip_postal_code` varchar(15) DEFAULT NULL,
   `country_region` varchar(50) DEFAULT NULL,
-  PRIMARY KEY (`id`),
+  PRIMARY KEY (`shipper_key`),
   KEY `city` (`city`),
   KEY `company` (`company`),
   KEY `zip_postal_code` (`zip_postal_code`),
   KEY `state_province` (`state_province`)
-) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb3;
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4;
 
 
 -- ----------------------------------------------------------------------
