@@ -55,7 +55,7 @@ USE ${da.db_name}
 -- COMMAND ----------
 
 CREATE TABLE weather_managed AS
-  SELECT * FROM parquet.`${da.paths.working_dir}/weather`
+  SELECT * FROM parquet.`${da.paths.working_dir}/weather`;
   
 DESCRIBE EXTENDED weather_managed
 
@@ -70,7 +70,7 @@ DESCRIBE EXTENDED weather_managed
 
 CREATE TABLE weather_external
   LOCATION "${da.paths.working_dir}/lab/external"
-  AS SELECT * FROM parquet.`${da.paths.working_dir}/weather`
+  AS SELECT * FROM parquet.`${da.paths.working_dir}/weather`;
   
 DESCRIBE EXTENDED weather_external
 
@@ -185,16 +185,13 @@ CREATE TABLE weather_managed AS
 -- COMMAND ----------
 
 -- MAGIC %md
--- MAGIC #### 5.0. Views and their Scoping
+-- MAGIC #### 5.0. Creating Views
 -- MAGIC 
--- MAGIC Using the provided **`AS`** clause, register:
--- MAGIC - a view named **`celsius`**
--- MAGIC - a temporary view named **`celsius_temp`**
--- MAGIC - a global temp view named **`celsius_global`**
+-- MAGIC Here we will demonstrate using the **`AS`** clause to register a view named **`celsius`**, a temporary view named **`celsius_temp`**, and a global temp view named **`celsius_global`**.
 
 -- COMMAND ----------
 
-CREATE OR REPLACE VIEW celsiusv AS
+CREATE OR REPLACE VIEW celsius AS
 (
   SELECT * FROM weather_managed
   WHERE UNIT = "C"
@@ -271,7 +268,3 @@ DROP DATABASE ${da.db_name} CASCADE
 
 -- MAGIC %python
 -- MAGIC DA.cleanup()
-
--- COMMAND ----------
-
-
