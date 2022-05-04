@@ -1,11 +1,43 @@
 # Databricks notebook source
+# MAGIC 
 # MAGIC %scala
-# MAGIC def cloudAndRegion = {
+# MAGIC // **********************************
+# MAGIC //  GET AZURE DATASOURCE
+# MAGIC // **********************************
+# MAGIC 
+# MAGIC def getAzureDataSource(): (String,String,String) = {
+# MAGIC   val datasource = spark.conf.get("com.databricks.training.azure.datasource").split("\t")
+# MAGIC   val source = datasource(0)
+# MAGIC   val sasEntity = datasource(1)
+# MAGIC   val sasToken = datasource(2)
+# MAGIC   return (source, sasEntity, sasToken)
+# MAGIC }
+# MAGIC 
+# MAGIC //**********************************
+# MAGIC // CREATE THE MOUNTS
+# MAGIC //**********************************
+# MAGIC 
+# MAGIC def getAwsRegion():String = {
+# MAGIC   try {
+# MAGIC     import scala.io.Source
+# MAGIC     import scala.util.parsing.json._
+# MAGIC 
+# MAGIC     val jsonString = Source.fromURL("http://169.254.169.254/latest/dynamic/instance-identity/document").mkString // reports ec2 info
+# MAGIC     val map = JSON.parseFull(jsonString).getOrElse(null).asInstanceOf[Map[Any,Any]]
+# MAGIC     map.getOrElse("region", null).asInstanceOf[String]
+# MAGIC 
+# MAGIC   } catch {
+# MAGIC     // We will use this later to know if we are Amazon vs Azure
+# MAGIC     case _: java.io.FileNotFoundException => null
+# MAGIC   }
+# MAGIC }
+# MAGIC 
+# MAGIC def getAzureRegion():String = {
 # MAGIC   import com.databricks.backend.common.util.Project
 # MAGIC   import com.databricks.conf.trusted.ProjectConf
 # MAGIC   import com.databricks.backend.daemon.driver.DriverConf
-# MAGIC   val conf = new DriverConf(ProjectConf.loadLocalConfig(Project.Driver))
-# MAGIC   (conf.cloudProvider.getOrElse("Unknown"), conf.region)
+# MAGIC 
+# MAGIC   new DriverConf(ProjectConf.loadLocalConfig(Project.Driver)).region
 # MAGIC }
 # MAGIC 
 # MAGIC // These keys are read-only so they're okay to have here
@@ -25,6 +57,11 @@
 # MAGIC     "eu-central-1"   -> (s"s3a://${awsAccessKey}:${awsSecretKey}@databricks-corp-training-eu-central-1/common", Map[String,String]()),
 # MAGIC     "eu-west-1"      -> (s"s3a://${awsAccessKey}:${awsSecretKey}@databricks-corp-training-eu-west-1/common", Map[String,String]()),
 # MAGIC     "eu-west-2"      -> (s"s3a://${awsAccessKey}:${awsSecretKey}@databricks-corp-training-eu-west-2/common", Map[String,String]()),
+# MAGIC 
+# MAGIC     // eu-west-3 in Paris isn't supported by Databricks yet - not supported by the current version of the AWS library
+# MAGIC     // "eu-west-3"      -> (s"s3a://${awsAccessKey}:${awsSecretKey}@databricks-corp-training-eu-west-3/common", Map[String,String]()),
+# MAGIC     
+# MAGIC     // Use Frankfurt in EU-Central-1 instead
 # MAGIC     "eu-west-3"      -> (s"s3a://${awsAccessKey}:${awsSecretKey}@databricks-corp-training-eu-central-1/common", Map[String,String]()),
 # MAGIC     
 # MAGIC     "sa-east-1"      -> (s"s3a://${awsAccessKey}:${awsSecretKey}@databricks-corp-training-sa-east-1/common", Map[String,String]()),
@@ -109,43 +146,43 @@
 # MAGIC   (source, configMap)
 # MAGIC }
 # MAGIC 
+# MAGIC def mountFailed(msg:String): Unit = {
+# MAGIC   println(msg)
+# MAGIC }
+# MAGIC 
 # MAGIC def retryMount(source: String, mountPoint: String): Unit = {
 # MAGIC   try { 
 # MAGIC     // Mount with IAM roles instead of keys for PVC
 # MAGIC     dbutils.fs.mount(source, mountPoint)
-# MAGIC     dbutils.fs.ls(mountPoint) // Test read to confirm successful mount.
 # MAGIC   } catch {
-# MAGIC     case e: Exception => throw new RuntimeException(s"*** ERROR: Unable to mount $mountPoint: ${e.getMessage}", e)
+# MAGIC     case e: Exception => mountFailed(s"*** ERROR: Unable to mount $mountPoint: ${e.getMessage}")
 # MAGIC   }
 # MAGIC }
 # MAGIC 
 # MAGIC def mount(source: String, extraConfigs:Map[String,String], mountPoint: String): Unit = {
 # MAGIC   try {
 # MAGIC     dbutils.fs.mount(source, mountPoint, extraConfigs=extraConfigs)
-# MAGIC     dbutils.fs.ls(mountPoint) // Test read to confirm successful mount.
 # MAGIC   } catch {
 # MAGIC     case ioe: java.lang.IllegalArgumentException => retryMount(source, mountPoint)
-# MAGIC     case e: Exception => throw new RuntimeException(s"*** ERROR: Unable to mount $mountPoint: ${e.getMessage}", e)
+# MAGIC     case e: Exception => mountFailed(s"*** ERROR: Unable to mount $mountPoint: ${e.getMessage}")
 # MAGIC   }
 # MAGIC }
 # MAGIC 
-# MAGIC def autoMount(fix:Boolean = false, failFast:Boolean = false, mountPoint:String = "/mnt/training"): Unit = {
-# MAGIC   val (cloud, region) = cloudAndRegion
-# MAGIC   spark.conf.set("com.databricks.training.cloud.name", cloud)
-# MAGIC   spark.conf.set("com.databricks.training.region.name", region)
-# MAGIC   if (cloud=="AWS")  {
-# MAGIC     val (source, extraConfigs) = getAwsMapping(region)
-# MAGIC     val resultMsg = mountSource(fix, failFast, mountPoint, source, extraConfigs)
-# MAGIC     displayHTML(s"Mounting course-specific datasets to <b>$mountPoint</b>...<br/>"+resultMsg)
-# MAGIC   } else if (cloud=="Azure") {
-# MAGIC     val (source, extraConfigs) = initAzureDataSource(region)
-# MAGIC     val resultMsg = mountSource(fix, failFast, mountPoint, source, extraConfigs)
-# MAGIC     displayHTML(s"Mounting course-specific datasets to <b>$mountPoint</b>...<br/>"+resultMsg)
+# MAGIC def autoMount(fix:Boolean = false, failFast:Boolean = false, mountDir:String = "/mnt/training"): Unit = {
+# MAGIC   var awsRegion = getAwsRegion()
+# MAGIC 
+# MAGIC   val (source, extraConfigs) = if (awsRegion != null)  {
+# MAGIC     spark.conf.set("com.databricks.training.region.name", awsRegion)
+# MAGIC     getAwsMapping(awsRegion)
+# MAGIC 
 # MAGIC   } else {
-# MAGIC     val (source, extraConfigs) = ("s3a://databricks-corp-training/common", Map[String,String]())
-# MAGIC     val resultMsg = mountSource(fix, failFast, mountPoint, source, extraConfigs)
-# MAGIC     displayHTML(s"Mounted course-specific datasets to <b>$mountPoint</b>.")
+# MAGIC     val azureRegion = getAzureRegion()
+# MAGIC     spark.conf.set("com.databricks.training.region.name", azureRegion)
+# MAGIC     initAzureDataSource(azureRegion)
 # MAGIC   }
+# MAGIC   
+# MAGIC   val resultMsg = mountSource(fix, failFast, mountDir, source, extraConfigs)
+# MAGIC   displayHTML(s"Mounting course-specific datasets to <b>$mountDir</b>...</br>"+resultMsg)
 # MAGIC }
 # MAGIC 
 # MAGIC def initAzureDataSource(azureRegion:String):(String,Map[String,String]) = {
@@ -159,21 +196,22 @@
 # MAGIC   return mapping
 # MAGIC }
 # MAGIC 
-# MAGIC def mountSource(fix:Boolean, failFast:Boolean, mountPoint:String, source:String, extraConfigs:Map[String,String]): String = {
+# MAGIC def mountSource(fix:Boolean, failFast:Boolean, mountDir:String, source:String, extraConfigs:Map[String,String]): String = {
 # MAGIC   val mntSource = source.replace(awsAuth+"@", "")
 # MAGIC 
-# MAGIC   if (dbutils.fs.mounts().map(_.mountPoint).contains(mountPoint)) {
-# MAGIC     val mount = dbutils.fs.mounts().filter(_.mountPoint == mountPoint).head
+# MAGIC   if (dbutils.fs.mounts().map(_.mountPoint).contains(mountDir)) {
+# MAGIC     val mount = dbutils.fs.mounts().filter(_.mountPoint == mountDir).head
 # MAGIC     if (mount.source == mntSource) {
-# MAGIC       return s"""Datasets are already mounted to <b>$mountPoint</b>."""
+# MAGIC       return s"""Datasets are already mounted to <b>$mountDir</b> from <b>$mntSource</b>"""
 # MAGIC       
 # MAGIC     } else if (failFast) {
 # MAGIC       throw new IllegalStateException(s"Expected $mntSource but found ${mount.source}")
 # MAGIC       
 # MAGIC     } else if (fix) {
-# MAGIC       println(s"Unmounting existing datasets ($mountPoint from ${mount.source}).")
-# MAGIC       dbutils.fs.unmount(mountPoint)
-# MAGIC       mountSource(fix, failFast, mountPoint, source, extraConfigs)
+# MAGIC       println(s"Unmounting existing datasets ($mountDir from $mntSource)")
+# MAGIC       dbutils.fs.unmount(mountDir)
+# MAGIC       mountSource(fix, failFast, mountDir, source, extraConfigs)
+# MAGIC 
 # MAGIC     } else {
 # MAGIC       return s"""<b style="color:red">Invalid Mounts!</b></br>
 # MAGIC                       <ul>
@@ -187,9 +225,9 @@
 # MAGIC                       </ol>"""
 # MAGIC     }
 # MAGIC   } else {
-# MAGIC     println(s"""Mounting datasets to $mountPoint.""")
-# MAGIC     mount(source, extraConfigs, mountPoint)
-# MAGIC     return s"""Mounted datasets to <b>$mountPoint</b> from <b>$mntSource<b>."""
+# MAGIC     println(s"""Mounting datasets to $mountDir from $mntSource""")
+# MAGIC     mount(source, extraConfigs, mountDir)
+# MAGIC     return s"""Mounted datasets to <b>$mountDir</b> from <b>$mntSource<b>"""
 # MAGIC   }
 # MAGIC }
 # MAGIC 
@@ -198,3 +236,22 @@
 # MAGIC }
 # MAGIC 
 # MAGIC autoMount(true)
+
+# COMMAND ----------
+
+# MAGIC %python
+# MAGIC 
+# MAGIC #**********************************
+# MAGIC # GET AZURE DATASOURCE
+# MAGIC #**********************************
+# MAGIC 
+# MAGIC 
+# MAGIC def getAzureDataSource(): 
+# MAGIC   datasource = spark.conf.get("com.databricks.training.azure.datasource").split("\t")
+# MAGIC   source = datasource[0]
+# MAGIC   sasEntity = datasource[1]
+# MAGIC   sasToken = datasource[2]
+# MAGIC   return (source, sasEntity, sasToken)
+# MAGIC 
+# MAGIC 
+# MAGIC None # Suppress output
